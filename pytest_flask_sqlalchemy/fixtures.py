@@ -14,7 +14,8 @@ def _db():
     that fixture, raise an error.
     '''
     msg = ("_db fixture not defined. The pytest-flask-sqlalchemy plugin " +
-           "requires you to define a _db fixture that returns a SQLAlchemy Session " +
+           "requires you to define a _db fixture that returns a SQLAlchemy Session, " +
+           "a SQLAlchemy scoped_session or a Flask-SQLAlchemy SQLAlchemy instance " +
            "with access to your test database. For more information, see the plugin " +
            "documentation: " +
            "https://github.com/jeancochrane/pytest-flask-sqlalchemy#conftest-setup")
@@ -27,18 +28,29 @@ def _transaction(request, _db, mocker):
     '''
     Create a transactional context for tests to run in.
     '''
-    # Start a transaction
-    connection = _db.engine.connect()
-    transaction = connection.begin()
+    if isinstance(_db, sa.orm.session.Session):
+        connection = _db.connection()
+        session = _db
+        session._Session__binds = {}
+        session.bind = connection
+    elif isinstance(_db, sa.orm.scoping.scoped_session):
+        engine = _db.session_factory.kw['bind']
+        connection = engine.connect()
+        session = _db(binds={}, bind=connection)
+    else:
+        connection = _db.engine.connect()
+        # Bind a session to the transaction. The empty `binds` dict is necessary
+        # when specifying a `bind` option, or else Flask-SQLAlchemy won't scope
+        # the connection properly
+        options = dict(bind=connection, binds={})
+        session = _db.create_scoped_session(options=options)
 
-    # Bind a session to the transaction. The empty `binds` dict is necessary
-    # when specifying a `bind` option, or else Flask-SQLAlchemy won't scope
-    # the connection properly
-    options = dict(bind=connection, binds={})
-    session = _db.create_scoped_session(options=options)
+    # Start a transaction
+    transaction = connection.begin()
 
     # Make sure the session, connection, and transaction can't be closed by accident in
     # the codebase
+    session.force_close = session.close
     connection.force_close = connection.close
     transaction.force_rollback = transaction.rollback
 
@@ -75,7 +87,9 @@ def _transaction(request, _db, mocker):
     @request.addfinalizer
     def teardown_transaction():
         # Delete the session
-        session.remove()
+        session.force_close()
+        if hasattr(session, 'remove'):
+            session.remove()
 
         # Rollback the transaction and return the connection to the pool
         transaction.force_rollback()
