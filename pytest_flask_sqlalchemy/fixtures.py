@@ -187,19 +187,9 @@ def _session(pytestconfig, _transaction, mocker):
     for mocked_session in pytestconfig._mocked_sessions:
         mocker.patch(mocked_session, new=session)
 
-    # Create a dummy class to mock out the sessionmakers
-    # (We need to do this as a class because we can't mock __call__ methods)
-    class FakeSessionMaker(sa.orm.Session):
-        def __call__(self):
-            return session
-
-        @classmethod
-        def configure(cls, *args, **kwargs):
-            pass
-
     # Mock out the WorkerSession
     for mocked_sessionmaker in pytestconfig._mocked_sessionmakers:
-        mocker.patch(mocked_sessionmaker, new_callable=FakeSessionMaker)
+        mocker.patch(mocked_sessionmaker + ".class_", lambda **kw: session)
 
     return session
 
