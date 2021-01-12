@@ -36,7 +36,11 @@ def _transaction(request, _db, mocker):
     elif isinstance(_db, sa.orm.scoping.scoped_session):
         engine = _db.session_factory.kw['bind']
         connection = engine.connect()
-        session = _db(binds={}, bind=connection)
+        # FIXME: not sure this is the best way to handle this...
+        if _db.registry.has():
+            session = _db()
+        else:
+            session = _db(binds={}, bind=connection)
     else:
         connection = _db.engine.connect()
         # Bind a session to the transaction. The empty `binds` dict is necessary
